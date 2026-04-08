@@ -61,8 +61,12 @@ export function useChessState() {
 
   const applyState = useCallback((r: GetStateResponse, ts?: number) => {
     // Skip stale updates (storage listener + poll can race)
-    if (ts && ts < lastUpdateRef.current) return;
+    if (ts && ts < lastUpdateRef.current) {
+      console.log('[ChessState] SKIP stale update, ts:', ts, 'last:', lastUpdateRef.current);
+      return;
+    }
     if (ts) lastUpdateRef.current = ts;
+    console.log('[ChessState] applyState — active:', r.active, 'fen:', r.fen?.substring(0, 30), 'board rows:', r.board?.length, 'playerColor:', r.playerColor);
 
     setActive(r.active);
     setBoard(r.board ?? []);

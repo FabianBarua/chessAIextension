@@ -53,15 +53,22 @@ export const BoardView = React.memo<BoardViewProps>(({ board, bestMove, flipped,
   const [sqSize, setSqSize] = useState(0);
   const theme = BOARD_THEMES[settings.boardTheme] ?? BOARD_THEMES.green;
 
+  const hasBoard = !!(board && board.length > 0);
+
   useEffect(() => {
     const el = ref.current;
-    if (!el) return;
-    const measure = () => setSqSize(Math.floor(el.offsetWidth / BOARD_SIZE));
+    if (!el) { console.log('[BoardView] ref is null, hasBoard:', hasBoard); return; }
+    const measure = () => {
+      const w = el.offsetWidth;
+      const sq = Math.floor(w / BOARD_SIZE);
+      console.log('[BoardView:measure] offsetWidth:', w, 'sqSize:', sq);
+      setSqSize(sq);
+    };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [hasBoard]);
 
   const hlSquares = useMemo(() => {
     if (!bestMove || bestMove.length < 4) return { from: null, to: null };

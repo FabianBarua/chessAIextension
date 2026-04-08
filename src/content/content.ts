@@ -286,6 +286,7 @@ function broadcast(b: RawBoard, fen: string): void {
   lastBroadcastKey = key;
   lastBroadcastFen = fen;
 
+  console.log('[Content:broadcast] fen:', fen.substring(0, 40), 'pieces:', Object.keys(b).length, 'moves:', moveHistory.length);
   try {
     chrome.runtime.sendMessage({
       type: 'BOARD_UPDATE',
@@ -295,8 +296,8 @@ function broadcast(b: RawBoard, fen: string): void {
       fen,
       playerColor: detectPlayerColor(),
     });
-  } catch {
-    // extension context invalidated
+  } catch (e) {
+    console.warn('[Content:broadcast] sendMessage failed:', e);
   }
 }
 

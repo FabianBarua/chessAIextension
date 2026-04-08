@@ -24,13 +24,27 @@ export const DEFAULT_SETTINGS: Settings = {
   humanLevel: 3,
 };
 
-// Human mode: [depth, multiPV, topN candidates to pick from]
-export const HUMAN_LEVELS: Record<number, { depth: number; multiPV: number; topN: number; label: string }> = {
-  1: { depth: 5,  multiPV: 5, topN: 5, label: 'Beginner' },
-  2: { depth: 8,  multiPV: 4, topN: 4, label: 'Casual' },
-  3: { depth: 10, multiPV: 3, topN: 3, label: 'Club' },
-  4: { depth: 14, multiPV: 2, topN: 2, label: 'Advanced' },
-  5: { depth: 16, multiPV: 2, topN: 1, label: 'Expert' },
+// Human mode levels with behavioral modeling parameters
+export const HUMAN_LEVELS: Record<number, {
+  depth: number;
+  multiPV: number;
+  label: string;
+  /** Softmax temperature: higher = more likely to pick suboptimal moves */
+  temperature: number;
+  /** Probability (0-1) of a random blunder on any given move */
+  blunderRate: number;
+  /** Max centipawn loss for "normal" (non-blunder) move selection */
+  maxCpLoss: number;
+  /** Per-move variance on temperature (0-1): models human inconsistency */
+  variance: number;
+  /** Target % of moves that should be top-1 engine move (anti-pattern) */
+  targetTop1Ratio: number;
+}> = {
+  1: { depth: 6,  multiPV: 6, label: 'Beginner',  temperature: 1.8,  blunderRate: 0.12, maxCpLoss: 300, variance: 0.6, targetTop1Ratio: 0.25 },
+  2: { depth: 9,  multiPV: 5, label: 'Casual',     temperature: 1.2,  blunderRate: 0.06, maxCpLoss: 180, variance: 0.4, targetTop1Ratio: 0.40 },
+  3: { depth: 12, multiPV: 4, label: 'Club',        temperature: 0.7,  blunderRate: 0.03, maxCpLoss: 100, variance: 0.3, targetTop1Ratio: 0.55 },
+  4: { depth: 15, multiPV: 3, label: 'Advanced',    temperature: 0.35, blunderRate: 0.01, maxCpLoss: 50,  variance: 0.2, targetTop1Ratio: 0.70 },
+  5: { depth: 18, multiPV: 3, label: 'Expert',      temperature: 0.15, blunderRate: 0.005,maxCpLoss: 25,  variance: 0.1, targetTop1Ratio: 0.82 },
 };
 
 export const ENGINE_DEPTH = 18;

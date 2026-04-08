@@ -17,12 +17,14 @@ export function createStockfish(
 
   function post(cmd: string) {
     if (!destroyed) {
+      console.log('[SF:post]', cmd);
       try { worker.postMessage(cmd); }
       catch { handleCrash(); }
     }
   }
 
   function handleCrash() {
+    console.error('[SF:CRASH] Worker crashed, auto-restarting...');
     if (destroyed) return;
     ready = false;
     searching = false;
@@ -60,6 +62,7 @@ export function createStockfish(
     if (line === 'uciok') { post('isready'); return; }
 
     if (line === 'readyok') {
+      console.log('[SF] readyok — engine ready');
       ready = true;
       onReady?.();
       flushPending();
@@ -67,6 +70,7 @@ export function createStockfish(
     }
 
     if (line.startsWith('info') && line.includes(' pv ')) {
+      console.log('[SF:info]', line.substring(0, 120));
       const dM = line.match(/depth (\d+)/);
       const sM = line.match(/score (cp|mate) (-?\d+)/);
       const pvM = line.match(/ pv (.+)$/);
@@ -88,6 +92,7 @@ export function createStockfish(
       current.bestMove = parts[1] ?? null;
       current.ponder = parts[3] ?? null;
       searching = false;
+      console.log('[SF:bestmove]', current.bestMove, 'ponder:', current.ponder, 'depth:', current.depth, 'score:', JSON.stringify(current.score));
 
       callback?.({ type: 'bestmove', ...current });
 
@@ -97,11 +102,12 @@ export function createStockfish(
   }
 
   function initWorker() {
+    console.log('[SF] Initializing worker...');
     ready = false;
     searching = false;
     worker = new Worker('stockfish-18-lite-single.js');
     worker.onmessage = handleMessage;
-    worker.onerror = () => handleCrash();
+    worker.onerror = (e) => { console.error('[SF:onerror]', e); handleCrash(); };
     post('uci');
   }
 

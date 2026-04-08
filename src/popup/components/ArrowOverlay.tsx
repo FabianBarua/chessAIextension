@@ -8,7 +8,11 @@ interface ArrowOverlayProps {
 }
 
 export const ArrowOverlay = React.memo<ArrowOverlayProps>(({ bestMove, flipped, squareSize }) => {
-  if (!bestMove || bestMove.length < 4 || !squareSize) return null;
+  console.log('[Arrow] bestMove:', bestMove, 'squareSize:', squareSize, 'flipped:', flipped);
+  if (!bestMove || bestMove.length < 4 || !squareSize) {
+    console.log('[Arrow] SKIP — bestMove:', bestMove, 'squareSize:', squareSize);
+    return null;
+  }
 
   let fromF = FILES.indexOf(bestMove[0]);
   let fromR = 8 - parseInt(bestMove[1]);
@@ -44,7 +48,7 @@ export const ArrowOverlay = React.memo<ArrowOverlayProps>(({ bestMove, flipped, 
   const strokeW = squareSize * 0.14;
 
   return (
-    <svg className="arrow-svg" viewBox={`0 0 ${w} ${h}`} width={w} height={h}>
+    <svg className="arrow-svg" viewBox={`0 0 ${w} ${h}`}>
       <defs>
         <filter id="ag" x="-30%" y="-30%" width="160%" height="160%">
           <feDropShadow dx="0" dy="1" stdDeviation="2" floodColor="#000" floodOpacity="0.5" />

@@ -12,20 +12,93 @@ interface PVLine {
   nps?: number;
 }
 
-function pickHumanMove(lines: PVLine[], topN: number): AnalysisState {
+type HumanLevel = typeof HUMAN_LEVELS[number];
+
+// ── Score helpers ──
+
+function scoreToCP(score: AnalysisState['score']): number {
+  if (!score) return 0;
+  return score.type === 'mate' ? score.value * 10000 : score.value;
+}
+
+function lineToAnalysis(line: PVLine): AnalysisState {
+  return {
+    depth: line.depth,
+    score: line.score,
+    pv: line.pv,
+    bestMove: line.pv[0] ?? null,
+    ponder: line.pv[1] ?? null,
+    nodes: line.nodes,
+    nps: line.nps,
+  };
+}
+
+// ── Anti-pattern tracker ──
+// Tracks whether we're picking top-1 too often and adjusts bias
+
+interface PickHistory {
+  total: number;
+  top1Count: number;
+}
+
+function shouldAvoidTop1(history: PickHistory, target: number): boolean {
+  if (history.total < 4) return false; // not enough data yet
+  const currentRatio = history.top1Count / history.total;
+  // If ratio is significantly above target, bias away from top-1
+  return currentRatio > target + 0.12;
+}
+
+// ── Human-like move selection ──
+
+function pickHumanMove(
+  lines: PVLine[],
+  level: HumanLevel,
+  history: PickHistory,
+): AnalysisState {
   if (lines.length === 0) return EMPTY_ANALYSIS;
+  if (lines.length === 1) return lineToAnalysis(lines[0]);
 
   // Sort by score (best first for the side to move)
-  const sorted = [...lines].sort((a, b) => {
-    const sa = a.score ? (a.score.type === 'mate' ? a.score.value * 10000 : a.score.value) : 0;
-    const sb = b.score ? (b.score.type === 'mate' ? b.score.value * 10000 : b.score.value) : 0;
-    return sb - sa;
+  const sorted = [...lines].sort((a, b) => scoreToCP(b.score) - scoreToCP(a.score));
+  const bestCP = scoreToCP(sorted[0].score);
+
+  // ── Blunder injection ──
+  // Small random chance of picking from the weaker half
+  if (sorted.length > 2 && Math.random() < level.blunderRate) {
+    const bottom = sorted.slice(Math.ceil(sorted.length / 2));
+    const pick = bottom[Math.floor(Math.random() * bottom.length)];
+    history.total++;
+    return lineToAnalysis(pick);
+  }
+
+  // ── Per-move variance (inconsistency modeling) ──
+  // Shift temperature randomly: sometimes focused, sometimes sloppy
+  const varianceFactor = 1 + (Math.random() * 2 - 1) * level.variance;
+  let effectiveTemp = level.temperature * Math.max(0.05, varianceFactor);
+
+  // ── Anti-pattern: if picking top-1 too often, inflate temperature ──
+  if (shouldAvoidTop1(history, level.targetTop1Ratio)) {
+    effectiveTemp *= 1.8;
+  }
+
+  // ── Filter within acceptable cp loss ──
+  const acceptable = sorted.filter(line => {
+    const cpLoss = bestCP - scoreToCP(line.score);
+    return cpLoss <= level.maxCpLoss;
+  });
+  const candidates = acceptable.length > 1 ? acceptable : sorted.slice(0, 2);
+
+  // ── Softmax weighting by centipawn difference ──
+  // w(i) = exp(-cpLoss / (temperature * 100))
+  // This means:
+  //   - A -5cp move is weighted ~0.95x of the best at temp=1.0
+  //   - A -100cp move is weighted ~0.37x of the best at temp=1.0
+  //   - At temp=0.15 (expert), even -20cp is weighted ~0.26x (so top-1 dominates but not 100%)
+  const weights = candidates.map(line => {
+    const cpLoss = bestCP - scoreToCP(line.score);
+    return Math.exp(-cpLoss / (effectiveTemp * 100));
   });
 
-  const candidates = sorted.slice(0, Math.min(topN, sorted.length));
-
-  // Weighted random: best candidate has highest weight
-  const weights = candidates.map((_, i) => Math.pow(candidates.length - i, 2));
   const total = weights.reduce((s, w) => s + w, 0);
   let r = Math.random() * total;
   let chosen = candidates[0];
@@ -34,15 +107,11 @@ function pickHumanMove(lines: PVLine[], topN: number): AnalysisState {
     if (r <= 0) { chosen = candidates[i]; break; }
   }
 
-  return {
-    depth: chosen.depth,
-    score: chosen.score,
-    pv: chosen.pv,
-    bestMove: chosen.pv[0] ?? null,
-    ponder: chosen.pv[1] ?? null,
-    nodes: chosen.nodes,
-    nps: chosen.nps,
-  };
+  // Update anti-pattern tracker
+  history.total++;
+  if (chosen === sorted[0]) history.top1Count++;
+
+  return lineToAnalysis(chosen);
 }
 
 export function useStockfish(fen: string, settings: Settings) {
@@ -52,14 +121,18 @@ export function useStockfish(fen: string, settings: Settings) {
   const engineRef = useRef<StockfishEngine | null>(null);
   const lastFenRef = useRef('');
   const lastSettingsRef = useRef({ humanMode: settings.humanMode, humanLevel: settings.humanLevel });
+  const pickHistoryRef = useRef<PickHistory>({ total: 0, top1Count: 0 });
 
   // Initialize engine once, with auto-restart on crash
   useEffect(() => {
+    console.log('[useStockfish] Creating engine...');
     const engine = createStockfish(
       () => {
+        console.log('[useStockfish] Engine READY');
         setEngineReady(true);
       },
       () => {
+        console.error('[useStockfish] Engine CRASHED');
         setEngineReady(false);
         lastFenRef.current = '';
       },
@@ -70,17 +143,33 @@ export function useStockfish(fen: string, settings: Settings) {
 
   // Run analysis whenever FEN changes, engine becomes ready, or human settings change
   useEffect(() => {
-    if (!analyzing || !fen) return;
+    console.log('[useStockfish:effect] analyzing:', analyzing, 'fen:', fen?.substring(0, 30), 'engineReady:', engineReady, 'humanMode:', settings.humanMode, 'humanLevel:', settings.humanLevel);
+    if (!analyzing || !fen) {
+      console.log('[useStockfish:effect] SKIP — analyzing:', analyzing, 'fen:', !!fen);
+      return;
+    }
 
     const settingsChanged =
       lastSettingsRef.current.humanMode !== settings.humanMode ||
       lastSettingsRef.current.humanLevel !== settings.humanLevel;
     lastSettingsRef.current = { humanMode: settings.humanMode, humanLevel: settings.humanLevel };
 
-    if (fen === lastFenRef.current && !settingsChanged) return;
+    // Reset anti-pattern tracker when settings change (new "game persona")
+    if (settingsChanged) {
+      pickHistoryRef.current = { total: 0, top1Count: 0 };
+    }
+
+    if (fen === lastFenRef.current && !settingsChanged) {
+      console.log('[useStockfish:effect] SKIP — same fen, no settings change');
+      return;
+    }
 
     const engine = engineRef.current;
-    if (!engine) return;
+    if (!engine) {
+      console.log('[useStockfish:effect] SKIP — no engine ref');
+      return;
+    }
+    console.log('[useStockfish:effect] Starting analysis for:', fen.substring(0, 40), 'humanMode:', settings.humanMode);
     lastFenRef.current = fen;
     setAnalysis(EMPTY_ANALYSIS);
 
@@ -88,6 +177,7 @@ export function useStockfish(fen: string, settings: Settings) {
       const lvl = HUMAN_LEVELS[settings.humanLevel] ?? HUMAN_LEVELS[3];
       const pvLines: PVLine[] = [];
 
+      console.log('[useStockfish] Human mode — depth:', lvl.depth, 'multiPV:', lvl.multiPV, 'temp:', lvl.temperature);
       engine.setOption('MultiPV', String(lvl.multiPV));
       engine.analyze(fen, lvl.depth, (d) => {
         // Collect PV lines from multi-PV info
@@ -110,16 +200,20 @@ export function useStockfish(fen: string, settings: Settings) {
         }
 
         if (d.type === 'bestmove') {
-          // Pick a human-like move from collected PV lines
-          const result = pickHumanMove(pvLines, lvl.topN);
+          console.log('[useStockfish:human] bestmove received, pvLines collected:', pvLines.length, pvLines.map(l => l.pv[0]));
+          const result = pickHumanMove(pvLines, lvl, pickHistoryRef.current);
+          console.log('[useStockfish:human] picked:', result.bestMove, 'score:', JSON.stringify(result.score));
           setAnalysis(result);
-          // Restore MultiPV to 1 for next potential non-human analysis
           engine.setOption('MultiPV', '1');
         }
       });
     } else {
+      console.log('[useStockfish] Normal mode — depth:', ENGINE_DEPTH);
       engine.setOption('MultiPV', '1');
       engine.analyze(fen, ENGINE_DEPTH, (d) => {
+        if (d.type === 'bestmove') {
+          console.log('[useStockfish:normal] bestmove:', d.bestMove, 'score:', JSON.stringify(d.score), 'pv:', d.pv?.slice(0, 3));
+        }
         setAnalysis(prev => ({ ...prev, ...d }));
       });
     }
@@ -140,6 +234,7 @@ export function useStockfish(fen: string, settings: Settings) {
     engineRef.current?.stop();
     setAnalysis(EMPTY_ANALYSIS);
     lastFenRef.current = '';
+    pickHistoryRef.current = { total: 0, top1Count: 0 };
   }, []);
 
   return { analysis, analyzing, engineReady, toggleAnalysis, resetAnalysis };

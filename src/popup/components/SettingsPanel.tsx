@@ -30,9 +30,6 @@ export const SettingsPanel = React.memo<SettingsPanelProps>(({ settings, onChang
           <div className="sett-human-level">
             <div className="sett-level-header">
               <span>Level: {HUMAN_LEVELS[settings.humanLevel].label}</span>
-              <span className="sett-level-detail">
-                depth {HUMAN_LEVELS[settings.humanLevel].depth}
-              </span>
             </div>
             <div className="sett-level-btns">
               {([1, 2, 3, 4, 5] as const).map((lvl) => (

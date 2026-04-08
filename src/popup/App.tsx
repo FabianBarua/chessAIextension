@@ -19,6 +19,7 @@ export default function App() {
   const { board, moves, fen, active, playerColor, activeColor, resetGame } = useChessState();
   const { settings, updateSettings } = useSettings();
   const { analysis, analyzing, engineReady, toggleAnalysis, resetAnalysis } = useStockfish(fen, settings);
+  console.log('[App] fen:', fen?.substring(0, 30), 'bestMove:', analysis.bestMove, 'analyzing:', analyzing, 'engineReady:', engineReady, 'active:', active, 'humanMode:', settings.humanMode);
   const [tab, setTab] = useState<TabKey>('board');
 
   const flipped = playerColor === 'black';

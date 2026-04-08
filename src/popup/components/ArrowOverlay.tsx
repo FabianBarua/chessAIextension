@@ -9,7 +9,8 @@ interface ArrowOverlayProps {
 
 export const ArrowOverlay = React.memo<ArrowOverlayProps>(({ bestMove, flipped, squareSize }) => {
   console.log('[Arrow] bestMove:', bestMove, 'squareSize:', squareSize, 'flipped:', flipped);
-  if (!bestMove || bestMove.length < 4 || !squareSize) {
+  // Validate: must be UCI format (e.g. "e2e4"), not "(none)" or garbage
+  if (!bestMove || bestMove.length < 4 || !squareSize || !/^[a-h][1-8][a-h][1-8]/.test(bestMove)) {
     console.log('[Arrow] SKIP — bestMove:', bestMove, 'squareSize:', squareSize);
     return null;
   }

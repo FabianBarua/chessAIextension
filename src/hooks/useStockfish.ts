@@ -119,7 +119,7 @@ export function useStockfish(fen: string, settings: Settings) {
   const [analyzing, setAnalyzing] = useState(true);
   const [engineReady, setEngineReady] = useState(false);
   const engineRef = useRef<StockfishEngine | null>(null);
-  const lastFenRef = useRef('');
+  const lastFenRef = useRef('');  // stores position+turn only
   const lastSettingsRef = useRef({ humanMode: settings.humanMode, humanLevel: settings.humanLevel });
   const pickHistoryRef = useRef<PickHistory>({ total: 0, top1Count: 0 });
 
@@ -149,6 +149,13 @@ export function useStockfish(fen: string, settings: Settings) {
       return;
     }
 
+    // Skip empty/invalid boards (e.g. navigating away from chess.com)
+    const position = fen.split(' ')[0];
+    if (!position || position === '8/8/8/8/8/8/8/8' || !position.includes('K') || !position.includes('k')) {
+      console.log('[useStockfish:effect] SKIP — empty or invalid board');
+      return;
+    }
+
     const settingsChanged =
       lastSettingsRef.current.humanMode !== settings.humanMode ||
       lastSettingsRef.current.humanLevel !== settings.humanLevel;
@@ -159,7 +166,11 @@ export function useStockfish(fen: string, settings: Settings) {
       pickHistoryRef.current = { total: 0, top1Count: 0 };
     }
 
-    if (fen === lastFenRef.current && !settingsChanged) {
+    // Compare only position + turn (ignore halfmove, fullmove, castling, ep metadata)
+    // This prevents re-analysis when polls return different metadata for the same board
+    const fenKey = fen.split(' ').slice(0, 2).join(' ');
+
+    if (fenKey === lastFenRef.current && !settingsChanged) {
       console.log('[useStockfish:effect] SKIP — same fen, no settings change');
       return;
     }
@@ -170,7 +181,7 @@ export function useStockfish(fen: string, settings: Settings) {
       return;
     }
     console.log('[useStockfish:effect] Starting analysis for:', fen.substring(0, 40), 'humanMode:', settings.humanMode);
-    lastFenRef.current = fen;
+    lastFenRef.current = fenKey;
     setAnalysis(EMPTY_ANALYSIS);
 
     if (settings.humanMode) {
@@ -204,7 +215,9 @@ export function useStockfish(fen: string, settings: Settings) {
           const result = pickHumanMove(pvLines, lvl, pickHistoryRef.current);
           console.log('[useStockfish:human] picked:', result.bestMove, 'score:', JSON.stringify(result.score));
           setAnalysis(result);
-          engine.setOption('MultiPV', '1');
+          // NOTE: Do NOT reset MultiPV here — if a new analysis is pending (flushPending),
+          // this would race and override the new analysis's MultiPV setting.
+          // MultiPV is always set at the START of each analysis path instead.
         }
       });
     } else {

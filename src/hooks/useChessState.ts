@@ -66,13 +66,21 @@ export function useChessState() {
       return;
     }
     if (ts) lastUpdateRef.current = ts;
-    console.log('[ChessState] applyState — active:', r.active, 'fen:', r.fen?.substring(0, 30), 'board rows:', r.board?.length, 'playerColor:', r.playerColor);
 
-    setActive(r.active);
+    // Deduplicate: skip if FEN and active status haven't changed
+    const newFen = r.fen ?? '';
+    const newActive = r.active;
+    setActive((prev) => {
+      if (prev === newActive) return prev;
+      return newActive;
+    });
+    setFen((prev) => {
+      if (prev === newFen) return prev;
+      console.log('[ChessState] applyState — active:', r.active, 'fen:', newFen.substring(0, 30), 'board rows:', r.board?.length, 'playerColor:', r.playerColor);
+      return newFen;
+    });
     setBoard(r.board ?? []);
     setMoves(r.moves ?? []);
-    // Always set fen & playerColor — even null/empty clears stale values
-    setFen(r.fen ?? '');
     setPlayerColor(r.playerColor ?? null);
   }, []);
 

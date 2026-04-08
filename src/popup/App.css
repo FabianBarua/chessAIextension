@@ -31,7 +31,13 @@ body {
 .cbadge { padding: 1px 7px; border-radius: 10px; font-size: 10px; font-weight: 600; margin-left: 4px; text-transform: capitalize; }
 .cbadge.white { background: #e8e8d5; color: #333; }
 .cbadge.black { background: #3a352e; color: #ccc; }
+.turn-badge {
+  padding: 1px 7px; border-radius: 10px; font-size: 10px; font-weight: 600; margin-left: 2px;
+}
+.turn-badge.white { background: #e8e8d5; color: #333; }
+.turn-badge.black { background: #3a352e; color: #ccc; }
 .mcnt { margin-left: auto; background: #1e2030; padding: 1px 7px; border-radius: 10px; font-size: 10px; color: #7dd3fc; }
+.engine-loading { font-size: 10px; color: #facc15; animation: pulse 1.5s infinite; }
 
 /* ── Tabs ── */
 .tabs { display: flex; background: #16181f; border-bottom: 2px solid #2a2d38; flex-shrink: 0; }
@@ -103,6 +109,17 @@ body {
 .is-then { font-size: 11px; color: #555; font-family: 'Consolas', monospace; }
 
 .is-waiting { font-size: 11px; color: #444; text-align: center; padding: 4px 0; }
+
+.is-probs { display: flex; gap: 12px; justify-content: center; }
+.is-prob { font-size: 11px; font-weight: 700; }
+.is-prob.white { color: #e8e8d5; }
+.is-prob.black { color: #a09880; }
+
+.is-pv { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.is-pv-label { font-size: 10px; text-transform: uppercase; color: #555; font-weight: 600; }
+.is-pv-moves { font-size: 11px; color: #777; font-family: 'Consolas', monospace; }
+
+.is-meta { font-size: 9px; color: #444; text-align: right; font-family: 'Consolas', monospace; }
 
 /* ── Move List ── */
 .mv-list { overflow-y: auto; max-height: calc(100vh - 140px); scrollbar-width: thin; scrollbar-color: #2a2d38 transparent; }

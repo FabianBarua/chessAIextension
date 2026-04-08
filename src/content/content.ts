@@ -16,7 +16,7 @@ const PIECE_SYMBOLS: Record<string, string> = {
   bp: '\u265F', br: '\u265C', bn: '\u265E', bb: '\u265D', bq: '\u265B', bk: '\u265A',
 };
 
-// ── State ──
+// ── Types ──
 
 interface BoardPiece {
   color: PieceColor;
@@ -26,18 +26,24 @@ interface BoardPiece {
 
 type RawBoard = Record<string, BoardPiece>;
 
-interface Departure { sq: string; piece: BoardPiece; }
-interface Arrival { sq: string; piece: BoardPiece; }
+interface Departure { sq: string; piece: BoardPiece }
+interface Arrival { sq: string; piece: BoardPiece }
+
+interface CastlingRights { K: boolean; Q: boolean; k: boolean; q: boolean }
+
+// ── State ──
 
 let moveHistory: ChessMove[] = [];
 let prevBoard: RawBoard = {};
 let moveNum = 1;
+let halfMoveClock = 0;
 let isActive = false;
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+let castling: CastlingRights = { K: true, Q: true, k: true, q: true };
 
 // ── DOM Parsing ──
 
-function parseSquare(sq: string): string {
+function sqToAlg(sq: string): string {
   return FILE_LETTERS[parseInt(sq[0])] + sq[1];
 }
 
@@ -45,11 +51,9 @@ function parsePiece(classList: DOMTokenList): BoardPiece | null {
   for (const cls of classList) {
     if (cls.length === 2 && (cls[0] === 'w' || cls[0] === 'b')) {
       const type = cls[1] as PieceType;
-      return {
-        color: cls[0] === 'w' ? 'white' : 'black',
-        type,
-        name: PIECE_NAMES[type] ?? (type as unknown as PieceName),
-      };
+      if (PIECE_NAMES[type]) {
+        return { color: cls[0] === 'w' ? 'white' : 'black', type, name: PIECE_NAMES[type] };
+      }
     }
   }
   return null;
@@ -66,11 +70,13 @@ function getSquareId(classList: DOMTokenList): string | null {
 
 function readBoard(): RawBoard {
   const board: RawBoard = {};
-  document.querySelectorAll('wc-chess-board .piece').forEach((el) => {
+  const pieces = document.querySelectorAll('wc-chess-board .piece');
+  for (let i = 0; i < pieces.length; i++) {
+    const el = pieces[i];
     const sq = getSquareId(el.classList);
     const p = parsePiece(el.classList);
     if (sq && p) board[sq] = p;
-  });
+  }
   return board;
 }
 
@@ -81,12 +87,36 @@ function getActiveTurn(): 'w' | 'b' {
   return moveHistory[moveHistory.length - 1].color === 'white' ? 'b' : 'w';
 }
 
+// ── Castling Rights Update ──
+
+function updateCastlingRights(from: string, piece: BoardPiece): void {
+  if (piece.type === 'k') {
+    if (piece.color === 'white') { castling.K = false; castling.Q = false; }
+    else { castling.k = false; castling.q = false; }
+  }
+  if (piece.type === 'r') {
+    if (piece.color === 'white') {
+      if (from === 'h1') castling.K = false;
+      if (from === 'a1') castling.Q = false;
+    } else {
+      if (from === 'h8') castling.k = false;
+      if (from === 'a8') castling.q = false;
+    }
+  }
+}
+
+function updateCastlingOnCapture(sq: string): void {
+  if (sq === 'h1') castling.K = false;
+  if (sq === 'a1') castling.Q = false;
+  if (sq === 'h8') castling.k = false;
+  if (sq === 'a8') castling.q = false;
+}
+
 // ── FEN Generation ──
 
 function boardToFEN(boardState: RawBoard): string {
   let fen = '';
 
-  // Piece placement
   for (let rank = 8; rank >= 1; rank--) {
     let empty = 0;
     for (let file = 1; file <= 8; file++) {
@@ -102,23 +132,15 @@ function boardToFEN(boardState: RawBoard): string {
     if (rank > 1) fen += '/';
   }
 
-  // Active color
   fen += ` ${getActiveTurn()}`;
 
-  // Castling rights (inferred from piece positions)
-  let castling = '';
-  const wk = boardState['51'], bk = boardState['58'];
-  if (wk?.type === 'k' && wk.color === 'white') {
-    if (boardState['81']?.type === 'r' && boardState['81'].color === 'white') castling += 'K';
-    if (boardState['11']?.type === 'r' && boardState['11'].color === 'white') castling += 'Q';
-  }
-  if (bk?.type === 'k' && bk.color === 'black') {
-    if (boardState['88']?.type === 'r' && boardState['88'].color === 'black') castling += 'k';
-    if (boardState['18']?.type === 'r' && boardState['18'].color === 'black') castling += 'q';
-  }
-  fen += ` ${castling || '-'}`;
+  let c = '';
+  if (castling.K) c += 'K';
+  if (castling.Q) c += 'Q';
+  if (castling.k) c += 'k';
+  if (castling.q) c += 'q';
+  fen += ` ${c || '-'}`;
 
-  // En passant
   let ep = '-';
   if (moveHistory.length > 0) {
     const last = moveHistory[moveHistory.length - 1];
@@ -131,12 +153,14 @@ function boardToFEN(boardState: RawBoard): string {
     }
   }
   fen += ` ${ep}`;
-  fen += ` 0 ${Math.max(1, Math.ceil(moveNum / 2))}`;
+
+  const fullMove = Math.max(1, Math.ceil(moveNum / 2));
+  fen += ` ${halfMoveClock} ${fullMove}`;
 
   return fen;
 }
 
-// ── Board to Array (for popup rendering) ──
+// ── Board to Array ──
 
 function boardToArray(boardState: RawBoard): BoardArray {
   const result: BoardArray = [];
@@ -167,17 +191,17 @@ function detectPlayerColor(): PieceColor | null {
 
 function sendUpdate(): void {
   try {
-    const currentBoard = readBoard();
+    const current = readBoard();
     chrome.runtime.sendMessage({
       type: 'BOARD_UPDATE',
-      board: boardToArray(currentBoard),
+      board: boardToArray(current),
       moves: moveHistory,
       moveNum,
-      fen: boardToFEN(currentBoard),
+      fen: boardToFEN(current),
       playerColor: detectPlayerColor(),
     });
   } catch {
-    // popup closed
+    // extension context invalidated or popup closed
   }
 }
 
@@ -202,7 +226,7 @@ function detectMoves(): void {
 
   if (!dep.length && !arr.length) return;
 
-  // Castling detection
+  // Castling: king + rook of same color both depart and arrive
   if (dep.length === 2 && arr.length === 2) {
     const kd = dep.find(d => d.piece.type === 'k');
     const rd = dep.find(d => d.piece.type === 'r');
@@ -210,13 +234,19 @@ function detectMoves(): void {
     const ra = arr.find(a => a.piece.type === 'r');
 
     if (kd && rd && ka && ra && kd.piece.color === rd.piece.color) {
+      const fromAlg = sqToAlg(kd.sq);
+      const toAlg = sqToAlg(ka.sq);
       const kf = parseInt(ka.sq[0]);
+
+      updateCastlingRights(fromAlg, kd.piece);
+      halfMoveClock++;
+
       moveHistory.push({
         num: moveNum,
         color: kd.piece.color,
         piece: 'King',
-        from: parseSquare(kd.sq),
-        to: parseSquare(ka.sq),
+        from: fromAlg,
+        to: toAlg,
         notation: kf > 4 ? 'O-O' : 'O-O-O',
         type: 'castling',
         symbol: PIECE_SYMBOLS[`${kd.piece.color === 'white' ? 'w' : 'b'}k`],
@@ -228,20 +258,32 @@ function detectMoves(): void {
     }
   }
 
-  // Regular moves
+  // Regular / capture / promotion / en passant
   for (const a of arr) {
-    const d = dep.find(x => x.piece.color === a.piece.color && x.piece.type === a.piece.type);
+    const d = dep.find(x => x.piece.color === a.piece.color && (x.piece.type === a.piece.type || (x.piece.type === 'p' && a.piece.type !== 'p')));
     const cap = dep.find(x => x.piece.color !== a.piece.color);
-    const from = d ? parseSquare(d.sq) : '??';
-    const to = parseSquare(a.sq);
+    const from = d ? sqToAlg(d.sq) : '??';
+    const to = sqToAlg(a.sq);
     const p = a.piece;
     const sym = PIECE_SYMBOLS[`${p.color === 'white' ? 'w' : 'b'}${p.type}`];
-    const promo = d && d.piece.type === 'p' && a.piece.type !== 'p';
+    const isPromo = d && d.piece.type === 'p' && a.piece.type !== 'p';
+    const isPawnMove = d?.piece.type === 'p' || a.piece.type === 'p';
+
+    // Update castling rights
+    if (d) updateCastlingRights(from, d.piece);
+    if (cap) updateCastlingOnCapture(sqToAlg(cap.sq));
+
+    // Update half-move clock
+    if (isPawnMove || cap) {
+      halfMoveClock = 0;
+    } else {
+      halfMoveClock++;
+    }
 
     const move: ChessMove = {
       num: moveNum,
       color: p.color,
-      piece: p.name,
+      piece: d?.piece.name ?? p.name,
       from,
       to,
       symbol: sym,
@@ -252,24 +294,27 @@ function detectMoves(): void {
     if (cap) {
       move.type = 'capture';
       move.captured = { piece: cap.piece.name, color: cap.piece.color };
-      move.notation = `${p.type === 'p' ? from[0] : p.name[0]}x${to}`;
+      const srcType = d?.piece.type ?? p.type;
+      move.notation = `${srcType === 'p' ? from[0] : (d?.piece.name ?? p.name)[0]}x${to}`;
     } else {
-      move.notation = `${p.type === 'p' ? '' : p.name[0]}${to}`;
+      const srcType = d?.piece.type ?? p.type;
+      move.notation = `${srcType === 'p' ? '' : (d?.piece.name ?? p.name)[0]}${to}`;
     }
 
-    if (promo) {
+    if (isPromo) {
       move.type = 'promotion';
       move.promotedTo = a.piece.name;
       move.notation += `=${a.piece.name[0]}`;
     }
 
-    // En passant
+    // En passant: pawn moves diagonally but no capture on destination
     if (d?.piece.type === 'p' && !cap && dep.length === 2) {
       const ep = dep.find(x => x.piece.color !== p.color);
       if (ep) {
         move.type = 'en_passant';
         move.captured = { piece: 'Pawn', color: ep.piece.color };
         move.notation = `${from[0]}x${to} e.p.`;
+        halfMoveClock = 0;
       }
     }
 
@@ -282,6 +327,57 @@ function detectMoves(): void {
 }
 
 // ── Board Initialization ──
+
+function resetState(): void {
+  moveHistory = [];
+  moveNum = 1;
+  halfMoveClock = 0;
+  castling = { K: true, Q: true, k: true, q: true };
+  prevBoard = readBoard();
+}
+
+function isStartingPosition(board: RawBoard): boolean {
+  const keys = Object.keys(board);
+  if (keys.length !== 32) return false;
+  // Check white and black back ranks
+  const wk = board['51'];
+  const bk = board['58'];
+  return !!(wk?.type === 'k' && wk.color === 'white' && bk?.type === 'k' && bk.color === 'black');
+}
+
+function detectNewGame(): void {
+  const current = readBoard();
+  const pieceCount = Object.keys(current).length;
+  const prevCount = Object.keys(prevBoard).length;
+
+  // If board suddenly has 32 pieces from a non-32 state, or it's starting position
+  // after we had moves, it's a new game
+  if (moveHistory.length > 0 && pieceCount === 32 && prevCount !== 32 && isStartingPosition(current)) {
+    resetState();
+    sendUpdate();
+  }
+}
+
+let boardObserver: MutationObserver | null = null;
+
+function observeBoard(boardEl: Element): void {
+  boardObserver?.disconnect();
+
+  boardObserver = new MutationObserver(() => {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      detectNewGame();
+      detectMoves();
+    }, MUTATION_DEBOUNCE_MS);
+  });
+
+  boardObserver.observe(boardEl, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['class'],
+  });
+}
 
 function waitForBoard(cb: (el: Element) => void): void {
   let retries = 0;
@@ -310,9 +406,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
   if (msg.type === 'RESET') {
-    moveHistory = [];
-    moveNum = 1;
-    prevBoard = readBoard();
+    resetState();
     sendUpdate();
     sendResponse({ ok: true });
     return true;
@@ -321,21 +415,22 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
 // ── Bootstrap ──
 
-waitForBoard((board) => {
-  prevBoard = readBoard();
-  moveNum = 1;
-  moveHistory = [];
+waitForBoard((boardEl) => {
+  resetState();
   isActive = true;
+  observeBoard(boardEl);
+  sendUpdate();
 
-  new MutationObserver(() => {
-    if (debounceTimer) clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(detectMoves, MUTATION_DEBOUNCE_MS);
-  }).observe(board, {
-    childList: true,
-    subtree: true,
-    attributes: true,
-    attributeFilter: ['class'],
+  // Watch for board element being replaced (SPA navigation, rematch, etc.)
+  const bodyObserver = new MutationObserver(() => {
+    const newBoardEl = document.querySelector('wc-chess-board');
+    if (newBoardEl && newBoardEl !== boardEl && newBoardEl.querySelectorAll('.piece').length > 0) {
+      boardEl = newBoardEl;
+      resetState();
+      observeBoard(newBoardEl);
+      sendUpdate();
+    }
   });
 
-  sendUpdate();
+  bodyObserver.observe(document.body, { childList: true, subtree: true });
 });

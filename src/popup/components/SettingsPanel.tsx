@@ -7,7 +7,7 @@ interface SettingsPanelProps {
   onChange: (next: Settings) => void;
 }
 
-export const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onChange }) => {
+export const SettingsPanel = React.memo<SettingsPanelProps>(({ settings, onChange }) => {
   const set = <K extends keyof Settings>(key: K, val: Settings[K]) => {
     onChange({ ...settings, [key]: val });
   };
@@ -69,4 +69,4 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onChange
       </button>
     </div>
   );
-};
+});

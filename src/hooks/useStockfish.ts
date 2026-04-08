@@ -1,55 +1,55 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { AnalysisState, StockfishEngine } from '../types';
+import { EMPTY_ANALYSIS } from '../types';
 import { createStockfish } from '../services/stockfish';
 import { ENGINE_DEPTH } from '../utils/constants';
 
-const EMPTY_ANALYSIS: AnalysisState = { depth: 0, score: null, pv: [], bestMove: null };
-
-export function useStockfish(fen: string, shouldAnalyze: boolean) {
+export function useStockfish(fen: string) {
   const [analysis, setAnalysis] = useState<AnalysisState>(EMPTY_ANALYSIS);
   const [analyzing, setAnalyzing] = useState(true);
-  const sfRef = useRef<StockfishEngine | null>(null);
+  const [engineReady, setEngineReady] = useState(false);
+  const engineRef = useRef<StockfishEngine | null>(null);
   const lastFenRef = useRef('');
 
-  // Initialize engine
+  // Initialize engine once
   useEffect(() => {
-    sfRef.current = createStockfish(() => {
-      sfRef.current?.setOption('MultiPV', '1');
+    const engine = createStockfish(() => {
+      engine.setOption('MultiPV', '1');
+      setEngineReady(true);
     });
-    return () => { sfRef.current?.destroy(); };
+    engineRef.current = engine;
+    return () => { engine.destroy(); };
   }, []);
 
-  // Analyze when FEN changes
+  // Run analysis whenever FEN changes OR engine becomes ready with a pending FEN
   useEffect(() => {
-    if (!analyzing || !fen || fen === lastFenRef.current || !sfRef.current?.isReady() || !shouldAnalyze) {
-      return;
-    }
+    if (!analyzing || !fen || fen === lastFenRef.current) return;
+    const engine = engineRef.current;
+    if (!engine) return;
     lastFenRef.current = fen;
     setAnalysis(EMPTY_ANALYSIS);
-    sfRef.current.analyze(fen, ENGINE_DEPTH, (d) => {
+    engine.analyze(fen, ENGINE_DEPTH, (d) => {
       setAnalysis(prev => ({ ...prev, ...d }));
     });
-  }, [fen, analyzing, shouldAnalyze]);
+  }, [fen, analyzing, engineReady]);
 
   const toggleAnalysis = useCallback(() => {
-    if (analyzing) {
-      sfRef.current?.stop();
-      setAnalyzing(false);
-    } else {
-      setAnalyzing(true);
-      if (fen && sfRef.current?.isReady() && shouldAnalyze) {
-        lastFenRef.current = fen;
-        sfRef.current.analyze(fen, ENGINE_DEPTH, (d) => {
-          setAnalysis(prev => ({ ...prev, ...d }));
-        });
+    setAnalyzing(prev => {
+      if (prev) {
+        engineRef.current?.stop();
+        return false;
       }
-    }
-  }, [analyzing, fen, shouldAnalyze]);
+      // Re-analyze current position when resuming
+      lastFenRef.current = '';
+      return true;
+    });
+  }, []);
 
   const resetAnalysis = useCallback(() => {
+    engineRef.current?.stop();
     setAnalysis(EMPTY_ANALYSIS);
     lastFenRef.current = '';
   }, []);
 
-  return { analysis, analyzing, toggleAnalysis, resetAnalysis };
+  return { analysis, analyzing, engineReady, toggleAnalysis, resetAnalysis };
 }

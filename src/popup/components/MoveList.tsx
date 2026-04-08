@@ -45,7 +45,7 @@ const MoveCell: React.FC<{ move: ChessMove | null; side: string }> = ({ move, si
   );
 };
 
-export const MoveList: React.FC<MoveListProps> = ({ moves }) => {
+export const MoveList = React.memo<MoveListProps>(({ moves }) => {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -72,4 +72,4 @@ export const MoveList: React.FC<MoveListProps> = ({ moves }) => {
       ))}
     </div>
   );
-};
+});

@@ -16,8 +16,8 @@ const TAB_LABELS: Record<TabKey, string> = {
 };
 
 export default function App() {
-  const { board, moves, fen, active, playerColor, resetGame, isMyTurn } = useChessState();
-  const { analysis, analyzing, toggleAnalysis, resetAnalysis } = useStockfish(fen, isMyTurn());
+  const { board, moves, fen, active, playerColor, activeColor, resetGame } = useChessState();
+  const { analysis, analyzing, engineReady, toggleAnalysis, resetAnalysis } = useStockfish(fen);
   const { settings, updateSettings } = useSettings();
   const [tab, setTab] = useState<TabKey>('board');
 
@@ -41,7 +41,6 @@ export default function App() {
 
   return (
     <div className="app">
-      {/* Header */}
       <header className="hdr">
         <div className="hdr-row">
           <h1>{'\u265F'} Chess Trainer</h1>
@@ -66,11 +65,16 @@ export default function App() {
               {playerColor === 'white' ? '\u2654' : '\u265A'} {playerColor}
             </span>
           )}
+          {activeColor && (
+            <span className={`turn-badge ${activeColor === 'w' ? 'white' : 'black'}`}>
+              {activeColor === 'w' ? '\u25CB' : '\u25CF'} {activeColor === 'w' ? 'White' : 'Black'} to move
+            </span>
+          )}
           {moves.length > 0 && <span className="mcnt">{moves.length} moves</span>}
+          {!engineReady && <span className="engine-loading">Engine loading...</span>}
         </div>
       </header>
 
-      {/* Tabs */}
       <nav className="tabs">
         {(['board', 'moves', 'settings'] as TabKey[]).map((t) => {
           const label = t === 'moves' && moves.length > 0
@@ -84,7 +88,6 @@ export default function App() {
         })}
       </nav>
 
-      {/* Content */}
       <main className="main">
         {tab === 'board' && (
           <BoardView
@@ -93,6 +96,7 @@ export default function App() {
             flipped={flipped}
             analysis={analysis}
             playerColor={playerColor}
+            activeColor={activeColor}
             settings={settings}
           />
         )}
@@ -100,7 +104,6 @@ export default function App() {
         {tab === 'settings' && <SettingsPanel settings={settings} onChange={updateSettings} />}
       </main>
 
-      {/* Footer */}
       <footer className="ftr">
         <button className="btn-rst" onClick={handleReset} disabled={moves.length === 0}>
           Reset

@@ -7,7 +7,7 @@ interface ArrowOverlayProps {
   squareSize: number;
 }
 
-export const ArrowOverlay: React.FC<ArrowOverlayProps> = ({ bestMove, flipped, squareSize }) => {
+export const ArrowOverlay = React.memo<ArrowOverlayProps>(({ bestMove, flipped, squareSize }) => {
   if (!bestMove || bestMove.length < 4 || !squareSize) return null;
 
   let fromF = FILES.indexOf(bestMove[0]);
@@ -56,4 +56,4 @@ export const ArrowOverlay: React.FC<ArrowOverlayProps> = ({ bestMove, flipped, s
       </g>
     </svg>
   );
-};
+});

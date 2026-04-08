@@ -12,12 +12,6 @@ export interface PieceCell {
   symbol: string;
 }
 
-export interface BoardSquare {
-  color: PieceColor;
-  type: PieceType;
-  name: PieceName;
-}
-
 export type BoardArray = (PieceCell | null)[][];
 
 export interface ChessMove {
@@ -50,6 +44,10 @@ export interface AnalysisState {
   nps?: number;
 }
 
+export const EMPTY_ANALYSIS: AnalysisState = {
+  depth: 0, score: null, pv: [], bestMove: null,
+};
+
 export interface Verdict {
   text: string;
   cls: 'winning' | 'equal' | 'difficult' | 'losing';
@@ -78,8 +76,6 @@ export interface Settings {
 }
 
 // ── Messaging Types ──
-
-export type TabId = number;
 
 export interface BoardUpdateMessage {
   type: 'BOARD_UPDATE';

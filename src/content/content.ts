@@ -1,5 +1,5 @@
 import type { PieceColor, PieceType, PieceName, ChessMove, PieceCell, BoardArray } from '../types';
-import { MUTATION_DEBOUNCE_MS, BOARD_WAIT_RETRIES, BOARD_WAIT_INTERVAL_MS } from '../utils/constants';
+import { MUTATION_DEBOUNCE_MS } from '../utils/constants';
 
 // ── Lookup Tables ──
 
@@ -31,6 +31,15 @@ interface Arrival { sq: string; piece: BoardPiece }
 
 interface CastlingRights { K: boolean; Q: boolean; k: boolean; q: boolean }
 
+interface PositionSnapshot {
+  key: string;
+  turn: 'w' | 'b';
+  castling: CastlingRights;
+  halfMoveClock: number;
+  moveNum: number;
+  epTarget: string;
+}
+
 // ── State ──
 
 let moveHistory: ChessMove[] = [];
@@ -40,6 +49,21 @@ let halfMoveClock = 0;
 let isActive = false;
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 let castling: CastlingRights = { K: true, Q: true, k: true, q: true };
+let positionSnapshots: PositionSnapshot[] = [];
+let lastBroadcastKey = '';
+
+// ── Board Key (for snapshot lookup) ──
+
+function boardKey(b: RawBoard): string {
+  const parts: string[] = [];
+  for (let rank = 1; rank <= 8; rank++) {
+    for (let file = 1; file <= 8; file++) {
+      const p = b[`${file}${rank}`];
+      if (p) parts.push(`${file}${rank}${p.color[0]}${p.type}`);
+    }
+  }
+  return parts.join('');
+}
 
 // ── DOM Parsing ──
 
@@ -82,9 +106,42 @@ function readBoard(): RawBoard {
 
 // ── Turn Detection ──
 
+// Simple & reliable: check chess.com's highlighted squares to see who moved last
+function detectTurnFromBoard(b: RawBoard): 'w' | 'b' {
+  const highlights = document.querySelectorAll('wc-chess-board .highlight');
+  for (let i = 0; i < highlights.length; i++) {
+    const sq = getSquareId(highlights[i].classList);
+    if (sq && b[sq]) {
+      // Piece on highlighted square = the piece that just moved → other color's turn
+      return b[sq].color === 'white' ? 'b' : 'w';
+    }
+  }
+  // No highlights = starting position
+  return 'w';
+}
+
 function getActiveTurn(): 'w' | 'b' {
-  if (moveHistory.length === 0) return 'w';
-  return moveHistory[moveHistory.length - 1].color === 'white' ? 'b' : 'w';
+  if (moveHistory.length > 0) {
+    return moveHistory[moveHistory.length - 1].color === 'white' ? 'b' : 'w';
+  }
+  return detectTurnFromBoard(readBoard());
+}
+
+// ── Castling Inference from Board ──
+
+function inferCastlingFromBoard(b: RawBoard): CastlingRights {
+  const c: CastlingRights = { K: false, Q: false, k: false, q: false };
+  const wk = b['51'];
+  if (wk?.type === 'k' && wk.color === 'white') {
+    if (b['81']?.type === 'r' && b['81'].color === 'white') c.K = true;
+    if (b['11']?.type === 'r' && b['11'].color === 'white') c.Q = true;
+  }
+  const bk = b['58'];
+  if (bk?.type === 'k' && bk.color === 'black') {
+    if (b['88']?.type === 'r' && b['88'].color === 'black') c.k = true;
+    if (b['18']?.type === 'r' && b['18'].color === 'black') c.q = true;
+  }
+  return c;
 }
 
 // ── Castling Rights Update ──
@@ -112,11 +169,32 @@ function updateCastlingOnCapture(sq: string): void {
   if (sq === 'a8') castling.q = false;
 }
 
-// ── FEN Generation ──
+// ── En Passant Target ──
 
-function boardToFEN(boardState: RawBoard): string {
+function computeEpTarget(): string {
+  if (moveHistory.length === 0) return '-';
+  const last = moveHistory[moveHistory.length - 1];
+  if (last.piece === 'Pawn') {
+    const fromRank = parseInt(last.from[1]);
+    const toRank = parseInt(last.to[1]);
+    if (Math.abs(toRank - fromRank) === 2) {
+      return `${last.to[0]}${(fromRank + toRank) / 2}`;
+    }
+  }
+  return '-';
+}
+
+// ── FEN Generation (parameterized — no global reads) ──
+
+function buildFEN(
+  boardState: RawBoard,
+  turn: 'w' | 'b',
+  cast: CastlingRights,
+  ep: string,
+  hmc: number,
+  fullMove: number,
+): string {
   let fen = '';
-
   for (let rank = 8; rank >= 1; rank--) {
     let empty = 0;
     for (let file = 1; file <= 8; file++) {
@@ -132,32 +210,24 @@ function boardToFEN(boardState: RawBoard): string {
     if (rank > 1) fen += '/';
   }
 
-  fen += ` ${getActiveTurn()}`;
-
   let c = '';
-  if (castling.K) c += 'K';
-  if (castling.Q) c += 'Q';
-  if (castling.k) c += 'k';
-  if (castling.q) c += 'q';
-  fen += ` ${c || '-'}`;
+  if (cast.K) c += 'K';
+  if (cast.Q) c += 'Q';
+  if (cast.k) c += 'k';
+  if (cast.q) c += 'q';
 
-  let ep = '-';
-  if (moveHistory.length > 0) {
-    const last = moveHistory[moveHistory.length - 1];
-    if (last.piece === 'Pawn') {
-      const fromRank = parseInt(last.from[1]);
-      const toRank = parseInt(last.to[1]);
-      if (Math.abs(toRank - fromRank) === 2) {
-        ep = `${last.to[0]}${(fromRank + toRank) / 2}`;
-      }
-    }
-  }
-  fen += ` ${ep}`;
+  return `${fen} ${turn} ${c || '-'} ${ep} ${hmc} ${fullMove}`;
+}
 
-  const fullMove = Math.max(1, Math.ceil(moveNum / 2));
-  fen += ` ${halfMoveClock} ${fullMove}`;
-
-  return fen;
+function currentFEN(boardState: RawBoard): string {
+  return buildFEN(
+    boardState,
+    getActiveTurn(),
+    castling,
+    computeEpTarget(),
+    halfMoveClock,
+    Math.max(1, Math.ceil(moveNum / 2)),
+  );
 }
 
 // ── Board to Array ──
@@ -187,35 +257,61 @@ function detectPlayerColor(): PieceColor | null {
   return board.classList.contains('flipped') ? 'black' : 'white';
 }
 
+// ── Snapshot Management ──
+
+function recordSnapshot(b: RawBoard): void {
+  positionSnapshots.push({
+    key: boardKey(b),
+    turn: getActiveTurn(),
+    castling: { ...castling },
+    halfMoveClock,
+    moveNum,
+    epTarget: computeEpTarget(),
+  });
+}
+
+function lookupSnapshot(key: string): PositionSnapshot | null {
+  for (let i = positionSnapshots.length - 1; i >= 0; i--) {
+    if (positionSnapshots[i].key === key) return positionSnapshots[i];
+  }
+  return null;
+}
+
 // ── State Broadcasting ──
 
-function sendUpdate(): void {
+function broadcast(b: RawBoard, fen: string): void {
+  const key = boardKey(b);
+  // Skip if nothing changed since last broadcast
+  if (key === lastBroadcastKey && fen === lastBroadcastFen) return;
+  lastBroadcastKey = key;
+  lastBroadcastFen = fen;
+
   try {
-    const current = readBoard();
     chrome.runtime.sendMessage({
       type: 'BOARD_UPDATE',
-      board: boardToArray(current),
+      board: boardToArray(b),
       moves: moveHistory,
       moveNum,
-      fen: boardToFEN(current),
+      fen,
       playerColor: detectPlayerColor(),
     });
   } catch {
-    // extension context invalidated or popup closed
+    // extension context invalidated
   }
 }
 
-// ── Move Detection ──
+let lastBroadcastFen = '';
 
-function detectMoves(): void {
-  const newBoard = readBoard();
-  const allSq = new Set([...Object.keys(prevBoard), ...Object.keys(newBoard)]);
+// ── Board Diff ──
+
+function diffBoard(a: RawBoard, b: RawBoard): { dep: Departure[]; arr: Arrival[] } {
+  const allSq = new Set([...Object.keys(a), ...Object.keys(b)]);
   const dep: Departure[] = [];
   const arr: Arrival[] = [];
 
   for (const sq of allSq) {
-    const was = prevBoard[sq];
-    const now = newBoard[sq];
+    const was = a[sq];
+    const now = b[sq];
     if (was && !now) dep.push({ sq, piece: was });
     else if (!was && now) arr.push({ sq, piece: now });
     else if (was && now && (was.color !== now.color || was.type !== now.type)) {
@@ -224,7 +320,18 @@ function detectMoves(): void {
     }
   }
 
-  if (!dep.length && !arr.length) return;
+  return { dep, arr };
+}
+
+// ── Move Detection (returns true if a move was recognized) ──
+
+function detectMoves(newBoard: RawBoard): boolean {
+  const { dep, arr } = diffBoard(prevBoard, newBoard);
+
+  if (!dep.length && !arr.length) return false;
+
+  // Too many changes for a single move → navigation / takeback
+  if (dep.length + arr.length > 5) return false;
 
   // Castling: king + rook of same color both depart and arrive
   if (dep.length === 2 && arr.length === 2) {
@@ -253,10 +360,12 @@ function detectMoves(): void {
       });
       moveNum++;
       prevBoard = newBoard;
-      sendUpdate();
-      return;
+      recordSnapshot(newBoard);
+      return true;
     }
   }
+
+  let pushed = false;
 
   // Regular / capture / promotion / en passant
   for (const a of arr) {
@@ -269,11 +378,9 @@ function detectMoves(): void {
     const isPromo = d && d.piece.type === 'p' && a.piece.type !== 'p';
     const isPawnMove = d?.piece.type === 'p' || a.piece.type === 'p';
 
-    // Update castling rights
     if (d) updateCastlingRights(from, d.piece);
     if (cap) updateCastlingOnCapture(sqToAlg(cap.sq));
 
-    // Update half-move clock
     if (isPawnMove || cap) {
       halfMoveClock = 0;
     } else {
@@ -307,7 +414,6 @@ function detectMoves(): void {
       move.notation += `=${a.piece.name[0]}`;
     }
 
-    // En passant: pawn moves diagonally but no capture on destination
     if (d?.piece.type === 'p' && !cap && dep.length === 2) {
       const ep = dep.find(x => x.piece.color !== p.color);
       if (ep) {
@@ -320,10 +426,44 @@ function detectMoves(): void {
 
     moveHistory.push(move);
     moveNum++;
+    pushed = true;
   }
 
-  prevBoard = newBoard;
-  sendUpdate();
+  if (pushed) {
+    prevBoard = newBoard;
+    recordSnapshot(newBoard);
+  }
+
+  return pushed;
+}
+
+// ── Navigation Handler (takeback / arrow keys / clicking moves) ──
+
+function handleNavigation(current: RawBoard): string {
+  const key = boardKey(current);
+  const snap = lookupSnapshot(key);
+
+  if (snap) {
+    return buildFEN(
+      current,
+      snap.turn,
+      snap.castling,
+      snap.epTarget,
+      snap.halfMoveClock,
+      Math.max(1, Math.ceil(snap.moveNum / 2)),
+    );
+  }
+
+  // Position not in history — detect turn from highlighted squares
+  const turn = detectTurnFromBoard(current);
+  return buildFEN(
+    current,
+    turn,
+    inferCastlingFromBoard(current),
+    '-',
+    0,
+    Math.max(1, Math.ceil(moveNum / 2)),
+  );
 }
 
 // ── Board Initialization ──
@@ -332,29 +472,87 @@ function resetState(): void {
   moveHistory = [];
   moveNum = 1;
   halfMoveClock = 0;
-  castling = { K: true, Q: true, k: true, q: true };
   prevBoard = readBoard();
+  lastBroadcastKey = '';
+  lastBroadcastFen = '';
+
+  // Detect turn from highlighted squares on the board
+  const turn = detectTurnFromBoard(prevBoard);
+  castling = isStartingPosition(prevBoard)
+    ? { K: true, Q: true, k: true, q: true }
+    : inferCastlingFromBoard(prevBoard);
+
+  positionSnapshots = [{
+    key: boardKey(prevBoard),
+    turn,
+    castling: { ...castling },
+    halfMoveClock: 0,
+    moveNum: 1,
+    epTarget: '-',
+  }];
 }
 
 function isStartingPosition(board: RawBoard): boolean {
   const keys = Object.keys(board);
   if (keys.length !== 32) return false;
-  // Check white and black back ranks
   const wk = board['51'];
   const bk = board['58'];
-  return !!(wk?.type === 'k' && wk.color === 'white' && bk?.type === 'k' && bk.color === 'black');
+  if (!wk || wk.type !== 'k' || wk.color !== 'white') return false;
+  if (!bk || bk.type !== 'k' || bk.color !== 'black') return false;
+  for (let f = 1; f <= 8; f++) {
+    const wp = board[`${f}2`];
+    const bp = board[`${f}7`];
+    if (!wp || wp.type !== 'p' || wp.color !== 'white') return false;
+    if (!bp || bp.type !== 'p' || bp.color !== 'black') return false;
+  }
+  return true;
 }
 
-function detectNewGame(): void {
-  const current = readBoard();
-  const pieceCount = Object.keys(current).length;
-  const prevCount = Object.keys(prevBoard).length;
+// ── Main Board Change Handler ──
 
-  // If board suddenly has 32 pieces from a non-32 state, or it's starting position
-  // after we had moves, it's a new game
-  if (moveHistory.length > 0 && pieceCount === 32 && prevCount !== 32 && isStartingPosition(current)) {
+function handleBoardChange(): void {
+  const current = readBoard();
+  const key = boardKey(current);
+
+  // No actual change — skip
+  if (key === lastBroadcastKey) return;
+
+  // New game detection: starting position after we already had moves
+  if (isStartingPosition(current) && moveHistory.length > 0) {
     resetState();
-    sendUpdate();
+    broadcast(prevBoard, currentFEN(prevBoard));
+    return;
+  }
+
+  // Drastic board change: more than half the squares differ → new game
+  if (moveHistory.length > 4) {
+    const allSq = new Set([...Object.keys(prevBoard), ...Object.keys(current)]);
+    let diffs = 0;
+    for (const sq of allSq) {
+      const pa = prevBoard[sq];
+      const pb = current[sq];
+      if (!pa && !pb) continue;
+      if (!pa || !pb || pa.color !== pb.color || pa.type !== pb.type) diffs++;
+    }
+    if (diffs > 16) {
+      resetState();
+      broadcast(prevBoard, currentFEN(prevBoard));
+      return;
+    }
+  }
+
+  // Try to detect a move
+  const moveDetected = detectMoves(current);
+
+  if (moveDetected) {
+    // Move detection already updated prevBoard and recorded snapshot
+    broadcast(current, currentFEN(current));
+  } else {
+    // Navigation (takeback, arrow keys, clicking a move in the list)
+    // Look up position in snapshots for correct FEN metadata
+    const fen = handleNavigation(current);
+    prevBoard = current; // update prevBoard so next diff is correct
+    broadcast(current, fen);
   }
 }
 
@@ -365,10 +563,7 @@ function observeBoard(boardEl: Element): void {
 
   boardObserver = new MutationObserver(() => {
     if (debounceTimer) clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => {
-      detectNewGame();
-      detectMoves();
-    }, MUTATION_DEBOUNCE_MS);
+    debounceTimer = setTimeout(handleBoardChange, MUTATION_DEBOUNCE_MS);
   });
 
   boardObserver.observe(boardEl, {
@@ -380,13 +575,20 @@ function observeBoard(boardEl: Element): void {
 }
 
 function waitForBoard(cb: (el: Element) => void): void {
-  let retries = 0;
-  (function check() {
+  const immediate = document.querySelector('wc-chess-board');
+  if (immediate && immediate.querySelectorAll('.piece').length > 0) {
+    cb(immediate);
+    return;
+  }
+
+  const obs = new MutationObserver(() => {
     const el = document.querySelector('wc-chess-board');
-    if (el && el.querySelectorAll('.piece').length > 0) return cb(el);
-    if (++retries > BOARD_WAIT_RETRIES) return;
-    setTimeout(check, BOARD_WAIT_INTERVAL_MS);
-  })();
+    if (el && el.querySelectorAll('.piece').length > 0) {
+      obs.disconnect();
+      cb(el);
+    }
+  });
+  obs.observe(document.body, { childList: true, subtree: true });
 }
 
 // ── Message Handler ──
@@ -394,12 +596,19 @@ function waitForBoard(cb: (el: Element) => void): void {
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'GET_STATE') {
     const b = readBoard();
+    const key = boardKey(b);
+    const snap = lookupSnapshot(key);
+    const turn = snap?.turn ?? detectTurnFromBoard(b);
+    const fen = snap
+      ? buildFEN(b, snap.turn, snap.castling, snap.epTarget, snap.halfMoveClock, Math.max(1, Math.ceil(snap.moveNum / 2)))
+      : buildFEN(b, turn, inferCastlingFromBoard(b), '-', 0, 1);
+
     sendResponse({
       active: isActive,
       board: boardToArray(b),
       moves: moveHistory,
       moveNum,
-      fen: boardToFEN(b),
+      fen,
       playerColor: detectPlayerColor(),
       hasBoard: !!document.querySelector('wc-chess-board'),
     });
@@ -407,7 +616,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
   if (msg.type === 'RESET') {
     resetState();
-    sendUpdate();
+    broadcast(prevBoard, currentFEN(prevBoard));
     sendResponse({ ok: true });
     return true;
   }
@@ -419,18 +628,42 @@ waitForBoard((boardEl) => {
   resetState();
   isActive = true;
   observeBoard(boardEl);
-  sendUpdate();
 
-  // Watch for board element being replaced (SPA navigation, rematch, etc.)
+  // Broadcast immediately with what we have
+  const snap0 = positionSnapshots[0];
+  const initFEN = snap0
+    ? buildFEN(prevBoard, snap0.turn, snap0.castling, snap0.epTarget, snap0.halfMoveClock, 1)
+    : currentFEN(prevBoard);
+  broadcast(prevBoard, initFEN);
+
+  // Re-broadcast after a short delay — chess.com may not have rendered
+  // highlights yet on initial load, so turn detection can improve
+  setTimeout(() => {
+    const b = readBoard();
+    const turn = detectTurnFromBoard(b);
+    const cast = isStartingPosition(b) ? { K: true, Q: true, k: true, q: true } as CastlingRights : inferCastlingFromBoard(b);
+    const fen = buildFEN(b, turn, cast, '-', 0, 1);
+    // Update snapshot with corrected turn
+    if (positionSnapshots[0]) positionSnapshots[0].turn = turn;
+    broadcast(b, fen);
+  }, 800);
+
+  const watchTarget = boardEl.parentElement ?? document.body;
   const bodyObserver = new MutationObserver(() => {
     const newBoardEl = document.querySelector('wc-chess-board');
-    if (newBoardEl && newBoardEl !== boardEl && newBoardEl.querySelectorAll('.piece').length > 0) {
+    if (!newBoardEl || newBoardEl.querySelectorAll('.piece').length === 0) return;
+    if (newBoardEl !== boardEl) {
       boardEl = newBoardEl;
       resetState();
       observeBoard(newBoardEl);
-      sendUpdate();
+      broadcast(prevBoard, currentFEN(prevBoard));
+      const newParent = newBoardEl.parentElement ?? document.body;
+      if (newParent !== watchTarget) {
+        bodyObserver.disconnect();
+        bodyObserver.observe(newParent, { childList: true, subtree: true });
+      }
     }
   });
 
-  bodyObserver.observe(document.body, { childList: true, subtree: true });
+  bodyObserver.observe(watchTarget, { childList: true, subtree: true });
 });

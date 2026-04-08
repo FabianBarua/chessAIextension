@@ -11,19 +11,27 @@ export function useStockfish(fen: string) {
   const engineRef = useRef<StockfishEngine | null>(null);
   const lastFenRef = useRef('');
 
-  // Initialize engine once
+  // Initialize engine once, with auto-restart on crash
   useEffect(() => {
-    const engine = createStockfish(() => {
-      engine.setOption('MultiPV', '1');
-      setEngineReady(true);
-    });
+    const engine = createStockfish(
+      () => {
+        engine.setOption('MultiPV', '1');
+        setEngineReady(true);
+      },
+      () => {
+        // Engine crashed — mark not ready, will become ready again after auto-restart
+        setEngineReady(false);
+        lastFenRef.current = ''; // force re-analysis when engine comes back
+      },
+    );
     engineRef.current = engine;
     return () => { engine.destroy(); };
   }, []);
 
-  // Run analysis whenever FEN changes OR engine becomes ready with a pending FEN
+  // Run analysis whenever FEN changes OR engine becomes ready
   useEffect(() => {
-    if (!analyzing || !fen || fen === lastFenRef.current) return;
+    if (!analyzing || !fen) return;
+    if (fen === lastFenRef.current) return;
     const engine = engineRef.current;
     if (!engine) return;
     lastFenRef.current = fen;

@@ -1,18 +1,59 @@
 import type { AnalysisState, StockfishEngine } from '../types';
 import { EMPTY_ANALYSIS } from '../types';
 
-export function createStockfish(onReady?: () => void): StockfishEngine {
-  const worker = new Worker('stockfish-18-lite-single.js');
-  type AnalysisCb = (data: AnalysisState & { type: string }) => void;
+type AnalysisCb = (data: AnalysisState & { type: string }) => void;
+
+export function createStockfish(
+  onReady?: () => void,
+  onCrash?: () => void,
+): StockfishEngine {
+  let worker: Worker;
   let callback: AnalysisCb | null = null;
   let ready = false;
   let current: AnalysisState = { ...EMPTY_ANALYSIS };
   let destroyed = false;
-  let pendingFen: { fen: string; depth: number; cb: AnalysisCb } | null = null;
+  let searching = false; // true while engine is between "go" and "bestmove"
+  let pendingAnalysis: { fen: string; depth: number; cb: AnalysisCb } | null = null;
 
-  const post = (cmd: string) => { if (!destroyed) worker.postMessage(cmd); };
+  function post(cmd: string) {
+    if (!destroyed) {
+      try { worker.postMessage(cmd); }
+      catch { handleCrash(); }
+    }
+  }
 
-  worker.onmessage = (e: MessageEvent) => {
+  function handleCrash() {
+    if (destroyed) return;
+    ready = false;
+    searching = false;
+    callback = null;
+    const hadPending = pendingAnalysis;
+    try { worker.terminate(); } catch { /* already dead */ }
+    onCrash?.();
+
+    // Auto-restart the worker
+    initWorker();
+
+    // If there was a pending analysis, it will be flushed on readyok
+    if (hadPending) pendingAnalysis = hadPending;
+  }
+
+  function flushPending() {
+    if (!pendingAnalysis || searching) return;
+    const { fen, depth, cb } = pendingAnalysis;
+    pendingAnalysis = null;
+    startSearch(fen, depth, cb);
+  }
+
+  function startSearch(fen: string, depth: number, cb: AnalysisCb) {
+    callback = cb;
+    current = { ...EMPTY_ANALYSIS };
+    searching = true;
+    post(`position fen ${fen}`);
+    post(`go depth ${depth}`);
+  }
+
+  function handleMessage(e: MessageEvent) {
     const line = typeof e.data === 'string' ? e.data : '';
     if (!line) return;
 
@@ -21,16 +62,7 @@ export function createStockfish(onReady?: () => void): StockfishEngine {
     if (line === 'readyok') {
       ready = true;
       onReady?.();
-      // Flush pending analysis that arrived before engine was ready
-      if (pendingFen) {
-        const { fen, depth, cb } = pendingFen;
-        pendingFen = null;
-        callback = cb;
-        current = { ...EMPTY_ANALYSIS };
-        post('stop');
-        post(`position fen ${fen}`);
-        post(`go depth ${depth}`);
-      }
+      flushPending();
       return;
     }
 
@@ -55,36 +87,63 @@ export function createStockfish(onReady?: () => void): StockfishEngine {
       const parts = line.split(' ');
       current.bestMove = parts[1] ?? null;
       current.ponder = parts[3] ?? null;
-      callback?.({ type: 'bestmove', ...current });
-    }
-  };
+      searching = false;
 
-  post('uci');
+      callback?.({ type: 'bestmove', ...current });
+
+      // If a new analysis was queued while we were searching, flush it now
+      flushPending();
+    }
+  }
+
+  function initWorker() {
+    ready = false;
+    searching = false;
+    worker = new Worker('stockfish-18-lite-single.js');
+    worker.onmessage = handleMessage;
+    worker.onerror = () => handleCrash();
+    post('uci');
+  }
+
+  initWorker();
 
   return {
     analyze(fen, depth, cb) {
       if (destroyed) return;
-      if (!ready) {
-        // Queue it — will be flushed on readyok
-        pendingFen = { fen, depth, cb };
-        return;
+
+      // Always queue the latest request
+      pendingAnalysis = { fen, depth, cb };
+
+      if (!ready) return; // will flush on readyok
+
+      if (searching) {
+        // Tell engine to stop — when bestmove arrives, flushPending fires
+        post('stop');
+      } else {
+        // Engine idle, flush immediately
+        flushPending();
       }
-      callback = cb;
-      current = { ...EMPTY_ANALYSIS };
-      post('stop');
-      post(`position fen ${fen}`);
-      post(`go depth ${depth}`);
     },
-    stop() { post('stop'); pendingFen = null; },
+
+    stop() {
+      pendingAnalysis = null;
+      if (searching) post('stop');
+    },
+
     setOption(name, value) { post(`setoption name ${name} value ${value}`); },
+
     destroy() {
       if (destroyed) return;
       destroyed = true;
       callback = null;
-      pendingFen = null;
-      post('quit');
-      worker.terminate();
+      pendingAnalysis = null;
+      searching = false;
+      try {
+        post('quit');
+        worker.terminate();
+      } catch { /* already dead */ }
     },
+
     isReady() { return ready && !destroyed; },
   };
 }

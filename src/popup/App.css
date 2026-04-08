@@ -170,7 +170,7 @@ body {
 /* ── Settings Panel ── */
 .settings-panel { display: flex; flex-direction: column; gap: 16px; }
 .sett-group { display: flex; flex-direction: column; gap: 6px; }
-.sett-label { font-size: 11px; font-weight: 700; text-transform: uppercase; color: #7dd3fc; letter-spacing: 0.5px; }
+.sett-label { font-size: 11px; font-weight: 700; text-transform: uppercase; color: #7dd3fc; letter-spacing: 0.5px; display: flex; align-items: center; justify-content: space-between; }
 .sett-options { display: flex; gap: 6px; flex-wrap: wrap; }
 .sett-opt {
   display: flex; flex-direction: column; align-items: center; gap: 4px;
@@ -184,6 +184,34 @@ body {
 .sett-prev-img { width: 22px; height: 22px; object-fit: contain; }
 .sett-color-prev { display: flex; gap: 3px; }
 .sett-opt-label { font-size: 10px; font-weight: 600; }
+/* ── Human Mode Toggle ── */
+.sett-toggle { position: relative; display: inline-block; width: 36px; height: 20px; cursor: pointer; }
+.sett-toggle input { opacity: 0; width: 0; height: 0; }
+.sett-toggle-slider {
+  position: absolute; inset: 0; border-radius: 10px;
+  background: #2a2d38; transition: background 0.2s;
+}
+.sett-toggle-slider::before {
+  content: ''; position: absolute; left: 2px; top: 2px;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: #888; transition: transform 0.2s, background 0.2s;
+}
+.sett-toggle input:checked + .sett-toggle-slider { background: #1a3a5c; }
+.sett-toggle input:checked + .sett-toggle-slider::before { transform: translateX(16px); background: #7dd3fc; }
+
+/* ── Human Level Selector ── */
+.sett-human-level { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.sett-level-header { display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: #ccc; }
+.sett-level-detail { font-size: 10px; color: #666; }
+.sett-level-btns { display: flex; gap: 4px; }
+.sett-lvl-btn {
+  flex: 1; padding: 6px 0; border: 1px solid #2a2d38; border-radius: 6px;
+  background: #16181f; color: #888; font-size: 11px; font-weight: 700;
+  cursor: pointer; transition: all 0.15s; text-align: center;
+}
+.sett-lvl-btn:hover { border-color: #555; color: #ddd; }
+.sett-lvl-btn.on { border-color: #7dd3fc; color: #fff; background: #1a1f30; }
+
 .btn-reset-settings {
   padding: 8px 16px; border: 1px solid #555; border-radius: 6px;
   background: transparent; color: #888; font-size: 11px; font-weight: 600;

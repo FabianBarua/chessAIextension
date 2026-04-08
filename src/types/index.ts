@@ -73,6 +73,8 @@ export interface BoardTheme {
 export interface Settings {
   pieceStyle: PieceStyleKey;
   boardTheme: BoardThemeKey;
+  humanMode: boolean;
+  humanLevel: number; // 1-5: 1=beginner, 5=advanced
 }
 
 // ── Messaging Types ──

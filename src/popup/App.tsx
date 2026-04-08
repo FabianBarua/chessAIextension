@@ -17,8 +17,8 @@ const TAB_LABELS: Record<TabKey, string> = {
 
 export default function App() {
   const { board, moves, fen, active, playerColor, activeColor, resetGame } = useChessState();
-  const { analysis, analyzing, engineReady, toggleAnalysis, resetAnalysis } = useStockfish(fen);
   const { settings, updateSettings } = useSettings();
+  const { analysis, analyzing, engineReady, toggleAnalysis, resetAnalysis } = useStockfish(fen, settings);
   const [tab, setTab] = useState<TabKey>('board');
 
   const flipped = playerColor === 'black';

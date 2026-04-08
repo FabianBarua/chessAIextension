@@ -20,6 +20,17 @@ export const BOARD_THEMES: Record<BoardThemeKey, BoardTheme> = {
 export const DEFAULT_SETTINGS: Settings = {
   pieceStyle: 'images',
   boardTheme: 'green',
+  humanMode: false,
+  humanLevel: 3,
+};
+
+// Human mode: [depth, multiPV, topN candidates to pick from]
+export const HUMAN_LEVELS: Record<number, { depth: number; multiPV: number; topN: number; label: string }> = {
+  1: { depth: 5,  multiPV: 5, topN: 5, label: 'Beginner' },
+  2: { depth: 8,  multiPV: 4, topN: 4, label: 'Casual' },
+  3: { depth: 10, multiPV: 3, topN: 3, label: 'Club' },
+  4: { depth: 14, multiPV: 2, topN: 2, label: 'Advanced' },
+  5: { depth: 16, multiPV: 2, topN: 1, label: 'Expert' },
 };
 
 export const ENGINE_DEPTH = 18;

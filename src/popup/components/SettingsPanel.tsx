@@ -1,6 +1,6 @@
 import React from 'react';
 import type { Settings, PieceStyleKey, BoardThemeKey } from '../../types';
-import { PIECE_STYLES, BOARD_THEMES, DEFAULT_SETTINGS } from '../../utils/constants';
+import { PIECE_STYLES, BOARD_THEMES, DEFAULT_SETTINGS, HUMAN_LEVELS } from '../../utils/constants';
 
 interface SettingsPanelProps {
   settings: Settings;
@@ -14,6 +14,41 @@ export const SettingsPanel = React.memo<SettingsPanelProps>(({ settings, onChang
 
   return (
     <div className="settings-panel">
+      <div className="sett-group">
+        <label className="sett-label">
+          <span>Human Mode</span>
+          <label className="sett-toggle">
+            <input
+              type="checkbox"
+              checked={settings.humanMode}
+              onChange={(e) => set('humanMode', e.target.checked)}
+            />
+            <span className="sett-toggle-slider" />
+          </label>
+        </label>
+        {settings.humanMode && (
+          <div className="sett-human-level">
+            <div className="sett-level-header">
+              <span>Level: {HUMAN_LEVELS[settings.humanLevel].label}</span>
+              <span className="sett-level-detail">
+                depth {HUMAN_LEVELS[settings.humanLevel].depth}
+              </span>
+            </div>
+            <div className="sett-level-btns">
+              {([1, 2, 3, 4, 5] as const).map((lvl) => (
+                <button
+                  key={lvl}
+                  className={`sett-lvl-btn${settings.humanLevel === lvl ? ' on' : ''}`}
+                  onClick={() => set('humanLevel', lvl)}
+                >
+                  {lvl}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
       <div className="sett-group">
         <label className="sett-label">Piece Style</label>
         <div className="sett-options">

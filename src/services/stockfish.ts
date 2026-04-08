@@ -89,8 +89,10 @@ export function createStockfish(
 
     if (line.startsWith('bestmove')) {
       const parts = line.split(' ');
-      current.bestMove = parts[1] ?? null;
-      current.ponder = parts[3] ?? null;
+      const bm = parts[1];
+      const po = parts[3];
+      current.bestMove = (bm && bm !== '(none)') ? bm : null;
+      current.ponder = (po && po !== '(none)') ? po : null;
       searching = false;
       console.log('[SF:bestmove]', current.bestMove, 'ponder:', current.ponder, 'depth:', current.depth, 'score:', JSON.stringify(current.score));
 

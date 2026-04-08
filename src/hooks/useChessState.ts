@@ -52,6 +52,7 @@ export function useChessState() {
   const [playerColor, setPlayerColor] = useState<PieceColor | null>(null);
   const tabRef = useRef<number | null>(null);
   const lastUpdateRef = useRef(0); // dedup storage vs poll races
+  const lastAppliedFenRef = useRef('');
 
   const activeColor = useMemo<ActiveColor | null>(() => {
     if (!fen) return null;
@@ -70,18 +71,16 @@ export function useChessState() {
     // Deduplicate: skip if FEN and active status haven't changed
     const newFen = r.fen ?? '';
     const newActive = r.active;
-    setActive((prev) => {
-      if (prev === newActive) return prev;
-      return newActive;
-    });
-    setFen((prev) => {
-      if (prev === newFen) return prev;
+    setActive(prev => prev === newActive ? prev : newActive);
+
+    if (newFen !== lastAppliedFenRef.current) {
+      lastAppliedFenRef.current = newFen;
       console.log('[ChessState] applyState — active:', r.active, 'fen:', newFen.substring(0, 30), 'board rows:', r.board?.length, 'playerColor:', r.playerColor);
-      return newFen;
-    });
-    setBoard(r.board ?? []);
-    setMoves(r.moves ?? []);
-    setPlayerColor(r.playerColor ?? null);
+      setFen(newFen);
+      setBoard(r.board ?? []);
+      setMoves(r.moves ?? []);
+      setPlayerColor(r.playerColor ?? null);
+    }
   }, []);
 
   const fetchState = useCallback(() => {

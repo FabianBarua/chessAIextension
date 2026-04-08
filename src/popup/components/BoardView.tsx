@@ -93,15 +93,19 @@ export const BoardView = React.memo<BoardViewProps>(({ board, bestMove, flipped,
   }, [board, flipped]);
 
   if (!board || board.length === 0) {
-    return <div className="empty-msg">No board detected</div>;
+    return (
+      <div className="flex items-center justify-center h-32 text-xs text-muted-foreground">
+        No board detected
+      </div>
+    );
   }
 
   const useImg = isImgStyle(settings.pieceStyle);
 
   return (
-    <div className="board-view">
-      <div className="board-wrap" ref={ref}>
-        <div className="board">
+    <div className="flex flex-col gap-0 pt-1">
+      <div className="w-full max-w-[400px] mx-auto" ref={ref}>
+        <div className="grid grid-cols-8 grid-rows-8 aspect-square w-full border-2 border-border rounded-lg overflow-hidden relative shadow-[0_4px_24px_rgba(0,0,0,0.5)]">
           {rows.map((row, dr) =>
             row.map((sq, df) => (
               <Square

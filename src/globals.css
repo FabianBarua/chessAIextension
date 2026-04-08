@@ -1,0 +1,78 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 222 47% 6%;
+    --foreground: 210 20% 90%;
+    --card: 222 40% 8%;
+    --card-foreground: 210 20% 90%;
+    --popover: 222 40% 8%;
+    --popover-foreground: 210 20% 90%;
+    --primary: 199 89% 56%;
+    --primary-foreground: 222 47% 6%;
+    --secondary: 215 28% 14%;
+    --secondary-foreground: 210 20% 80%;
+    --muted: 215 28% 14%;
+    --muted-foreground: 215 15% 50%;
+    --accent: 215 28% 17%;
+    --accent-foreground: 210 20% 90%;
+    --destructive: 0 72% 60%;
+    --destructive-foreground: 210 20% 98%;
+    --border: 215 28% 16%;
+    --input: 215 28% 16%;
+    --ring: 199 89% 56%;
+    --radius: 0.625rem;
+    --chart-1: 142 71% 45%;
+    --chart-2: 199 89% 56%;
+    --chart-3: 47 96% 53%;
+    --chart-4: 24 95% 53%;
+    --chart-5: 0 72% 60%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Inter', 'SF Pro Display', system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+/* ── Board squares (not replaceable by Tailwind due to dynamic theming) ── */
+.sq {
+  @apply flex items-center justify-center relative aspect-square;
+  font-size: min(6vw, 42px);
+  line-height: 1;
+}
+
+.sq.hl-from { background: hsl(217 58% 68%) !important; }
+.sq.hl-to   { background: hsl(217 50% 58%) !important; }
+
+.pc-img {
+  @apply w-[85%] h-[85%] object-contain select-none pointer-events-none;
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.3));
+}
+
+.pc { @apply select-none; }
+.pc.white { color: #fff; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.35)); }
+.pc.black { color: #1a1a1a; }
+
+.fl { @apply absolute bottom-px right-0.5 text-[7px] font-bold pointer-events-none; color: rgba(0,0,0,0.22); }
+.rl { @apply absolute top-px left-0.5 text-[7px] font-bold pointer-events-none; color: rgba(0,0,0,0.22); }
+
+/* ── Arrow SVG ── */
+.arrow-svg {
+  @apply absolute top-0 left-0 w-full h-full pointer-events-none;
+  z-index: 5;
+}
+
+/* ── Custom scrollbar ── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground)); }
